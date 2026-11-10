@@ -56,15 +56,15 @@ impl WorkerPool {
     pub fn spawn_worker(&mut self, task: WorkerTask) {
         let worker_id = task.worker_id;
         let handle = thread::spawn(move || {
-            pytest_command(
+            let mut prepared = pytest_command(
                 &task.program,
                 &task.initial_args,
                 &task.tests,
                 &[],
                 Some(&task.working_dir),
                 &task.env_vars,
-            )
-            .output()
+            )?;
+            prepared.command.output()
         });
 
         self.workers.push(WorkerHandle {

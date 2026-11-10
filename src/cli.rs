@@ -56,6 +56,10 @@ pub struct Args {
     #[arg(long, value_enum, default_value = "pytest")]
     pub runner: Runner,
 
+    /// Select whole pytest functions and let pytest expand their parametrizations
+    #[arg(long)]
+    pub pytest_functions: bool,
+
     /// Test files or directories to run
     #[arg(help = "Test files or directories to run")]
     pub files: Vec<String>,
