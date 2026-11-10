@@ -84,6 +84,9 @@ finish. During quiet periods the reporter prints active worker counts and the
 longest-running phase every five seconds, including while other workers collect.
 Report files are tailed incrementally with bounded reads per worker so a large
 backlog cannot prevent another worker's activity from being displayed.
+The parent preserves pytest plugin autoload, including Sugar on interactive
+terminals. Only worker terminals are suppressed. Caller-supplied plugin exclusions
+such as `-p no:sugar` remain authoritative.
 
 `--quiet-collection` suppresses the static selector listing and parameter
 expansion warnings when embedding rtest in another CLI. Collection errors are

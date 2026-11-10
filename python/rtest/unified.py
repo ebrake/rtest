@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -72,6 +73,12 @@ class _Controller:
         if not isinstance(reporter, TerminalReporter):
             return
         nodeid, phase, started = min(self.active.values(), key=lambda activity: activity[2])
+        reset_lines = getattr(reporter, "reset_tracked_lines", None)
+        if reset_lines is not None:
+            # Sugar tracks cursor positions for previously printed test rows.
+            # A status line starts a fresh block so later results cannot overwrite it.
+            reporter.write_line("")
+            reset_lines()
         reporter.write_line(f"rtest: {len(self.active)} workers active; {phase} {nodeid} ({now - started:.0f}s)")
         reporter._tw.flush()
         self.last_progress = now
@@ -127,6 +134,9 @@ class _Controller:
                 reporter._numcollected = selected + deselected
                 reporter.stats.setdefault("deselected", []).extend([None] * deselected)
             session.config.hook.pytest_collection_finish(session=session)
+            if isinstance(reporter, TerminalReporter) and hasattr(reporter, "tests_count"):
+                # Sugar's collection hook sees no parent Items in reporting-only sessions.
+                reporter.tests_count = selected
             for event in self.pending:
                 self._dispatch(session.config, event)
             self.pending.clear()
@@ -141,6 +151,15 @@ class _Controller:
         # Include environment initialized by the parent's pytest configuration
         # (for example a shared random seed), then apply explicit CLI overrides.
         environment = dict(os.environ, **self.environment)
+        # Sugar renders only in the parent; workers deliberately do not load it.
+        environment["PYTEST_ADDOPTS"] = shlex.join(
+            option for option in shlex.split(environment.get("PYTEST_ADDOPTS", "")) if option != "--force-sugar"
+        )
+        for index, argument in enumerate(arguments):
+            if argument.startswith("--env=PYTEST_ADDOPTS="):
+                arguments[index] = f"--env=PYTEST_ADDOPTS={environment['PYTEST_ADDOPTS']}"
+            elif argument.startswith("PYTEST_ADDOPTS=") and index and arguments[index - 1] in {"-e", "--env"}:
+                arguments[index] = f"PYTEST_ADDOPTS={environment['PYTEST_ADDOPTS']}"
         with subprocess.Popen([sys.executable, "-m", "rtest", *arguments], env=environment) as process:
             try:
                 while process.poll() is None:
@@ -189,11 +208,7 @@ def run(arguments: list[str]) -> int:
         if "PYTEST_ADDOPTS" in environment:
             os.environ["PYTEST_ADDOPTS"] = environment["PYTEST_ADDOPTS"]
         try:
-            return int(
-                pytest.main(
-                    ["-o", "addopts=", "-o", f"cache_dir={root / 'cache'}", "-p", "no:sugar"], plugins=[controller]
-                )
-            )
+            return int(pytest.main(["-o", "addopts=", "-o", f"cache_dir={root / 'cache'}"], plugins=[controller]))
         finally:
             controller.close()
             if previous_addopts is None:
