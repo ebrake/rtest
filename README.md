@@ -66,6 +66,10 @@ Pass pytest marker filters through `--env PYTEST_ADDOPTS="-m critical"`.
 Workers with no matching tests do not fail a run when another worker selected
 tests; a globally empty selection retains pytest's exit code 5.
 
+Parallel pytest workers use separate temporary cache directories. Pytest's
+`cache` fixture remains available within each worker; cached values do not
+persist between parallel rtest invocations.
+
 ### Native Runner
 
 The native runner (`--runner native`) executes tests using rtest's own decorators:

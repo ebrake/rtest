@@ -56,11 +56,18 @@ impl WorkerPool {
     pub fn spawn_worker(&mut self, task: WorkerTask) {
         let worker_id = task.worker_id;
         let handle = thread::spawn(move || {
+            // Independent pytest sessions cannot atomically share cache updates
+            // on every supported platform, notably Windows.
+            let cache = tempfile::tempdir()?;
+            let pytest_args = vec![
+                "-o".to_string(),
+                format!("cache_dir={}", cache.path().display()),
+            ];
             let mut prepared = pytest_command(
                 &task.program,
                 &task.initial_args,
                 &task.tests,
-                &[],
+                &pytest_args,
                 Some(&task.working_dir),
                 &task.env_vars,
             )?;

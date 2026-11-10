@@ -11,6 +11,25 @@ from rtest.exit_code import ExitCodeValues
 
 
 class TestPytestFunctionSelection:
+    def test_parallel_workers_have_isolated_cache_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            body = (
+                "    assert cache.get('worker-value', None) is None\n"
+                "    cache.set('worker-value', 'present')\n"
+                "    with Path('cache-directories.txt').open('a') as stream:\n"
+                "        stream.write(str(cache._cachedir) + '\\n')\n"
+            )
+            (root / "test_cases.py").write_text(
+                "from pathlib import Path\n"
+                + "\n".join(f"def test_worker_{index}(cache):\n{body}" for index in range(4))
+            )
+            result = self._run(root, "-n", "4")
+            assert result.returncode == 0, result.stdout + result.stderr
+            paths = (root / "cache-directories.txt").read_text().splitlines()
+            assert len(paths) == len(set(paths)) == 4
+            assert all(not Path(path).exists() for path in paths)
+
     def _run(self, root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
         environment.pop("PYTEST_PLUGINS", None)
