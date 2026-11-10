@@ -17,16 +17,15 @@ class TestPytestFunctionSelection:
             body = (
                 "    assert cache.get('worker-value', None) is None\n"
                 "    cache.set('worker-value', 'present')\n"
-                "    with Path('cache-directories.txt').open('a') as stream:\n"
-                "        stream.write(str(cache._cachedir) + '\\n')\n"
+                "    Path(f'cache-directory-{os.getpid()}.txt').write_text(str(cache._cachedir))\n"
             )
             (root / "test_cases.py").write_text(
-                "from pathlib import Path\n"
+                "import os\nfrom pathlib import Path\n"
                 + "\n".join(f"def test_worker_{index}(cache):\n{body}" for index in range(4))
             )
             result = self._run(root, "-n", "4")
             assert result.returncode == 0, result.stdout + result.stderr
-            paths = (root / "cache-directories.txt").read_text().splitlines()
+            paths = [path.read_text() for path in root.glob("cache-directory-*.txt")]
             assert len(paths) == len(set(paths)) == 4
             assert all(not Path(path).exists() for path in paths)
 
