@@ -27,6 +27,48 @@ def _run(root: Path, *arguments: str, addopts: str = "", workers: int = 2) -> su
 
 
 class TestUnifiedOutput:
+    def test_setup_activity_arrives_before_a_fixture_is_released(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            gate = root / "continue"
+            (root / "test_setup.py").write_text(
+                "import pytest, time\nfrom pathlib import Path\n"
+                "@pytest.fixture\ndef blocked():\n"
+                "    deadline = time.monotonic() + 25\n"
+                "    while not Path('continue').exists():\n"
+                "        assert time.monotonic() < deadline\n"
+                "        time.sleep(0.01)\n"
+                "def test_wait(blocked): pass\n"
+            )
+            received: Queue[str] = Queue()
+            with subprocess.Popen(
+                [sys.executable, "-m", "rtest", "--pytest-functions", "--unified-output", "-n", "2"],
+                cwd=root,
+                env=_environment("-q"),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            ) as process:
+                assert process.stdout is not None
+
+                def read() -> None:
+                    assert process.stdout is not None
+                    for line in process.stdout:
+                        received.put(line)
+
+                reader = Thread(target=read, daemon=True)
+                reader.start()
+                try:
+                    while "setup test_setup.py::test_wait" not in received.get(timeout=15):
+                        pass
+                    assert process.poll() is None
+                    assert not gate.exists()
+                finally:
+                    gate.touch()
+                    process.wait(timeout=15)
+                    reader.join(timeout=5)
+                assert process.returncode == 0
+
     def test_one_summary_preserves_outcomes_warnings_and_captured_failures(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -79,6 +79,11 @@ reports instead of printing separate session headers. Failures, captured output,
 warnings, skips, expected failures, and durations retain pytest's reporting.
 The reporter does not collect or execute tests itself. Uncaptured `-s` output
 still streams directly, and results appear as parallel tests finish.
+Workers also report entry into setup, call, and teardown before those phases
+finish. During quiet periods the reporter prints active worker counts and the
+longest-running phase every five seconds, including while other workers collect.
+Report files are tailed incrementally with bounded reads per worker so a large
+backlog cannot prevent another worker's activity from being displayed.
 
 `--quiet-collection` suppresses the static selector listing and parameter
 expansion warnings when embedding rtest in another CLI. Collection errors are

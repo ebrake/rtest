@@ -43,6 +43,25 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
     _emit("report", data=report._to_json())
 
 
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    _emit("activity", nodeid=item.nodeid, phase="setup")
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_call(item: pytest.Item) -> None:
+    _emit("activity", nodeid=item.nodeid, phase="call")
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_teardown(item: pytest.Item) -> None:
+    _emit("activity", nodeid=item.nodeid, phase="teardown")
+
+
+def pytest_runtest_logfinish(nodeid: str) -> None:
+    _emit("idle")
+
+
 def pytest_collectreport(report: pytest.CollectReport) -> None:
     if report.failed or report.skipped:
         _emit("report", data=report._to_json())

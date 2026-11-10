@@ -10,7 +10,7 @@ import tempfile
 import time
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator, TextIO
 
 import pytest
 from _pytest.terminal import TerminalReporter
@@ -23,7 +23,9 @@ class _Controller:
         self.arguments = arguments
         self.directory = directory
         self.environment = environment
-        self.offsets: dict[Path, int] = {}
+        self.streams: dict[Path, TextIO] = {}
+        self.active: dict[Path, tuple[str, str, float]] = {}
+        self.last_progress = time.monotonic()
         self.expected: int | None = None
         self.collected: dict[Path, tuple[int, int]] = {}
         self.finished: set[Path] = set()
@@ -41,17 +43,38 @@ class _Controller:
     def pytest_collection(self) -> bool:
         return True
 
-    def _read_events(self) -> list[tuple[Path, dict[str, Any]]]:
-        events = []
+    def _read_events(self, *, final: bool = False) -> Iterator[tuple[Path, dict[str, Any]]]:
         for path in sorted(self.directory.glob("*.jsonl")):
-            with path.open(encoding="utf-8") as stream:
-                stream.seek(self.offsets.get(path, 0))
-                while line := stream.readline():
-                    if not line.endswith("\n"):
-                        break
-                    events.append((path, json.loads(line)))
-                    self.offsets[path] = stream.tell()
-        return events
+            if path not in self.streams:
+                self.streams[path] = path.open(encoding="utf-8")
+            stream = self.streams[path]
+            # Bound each worker's turn while live; final draining must reach EOF.
+            count = 0
+            while final or count < 256:
+                offset = stream.tell()
+                line = stream.readline()
+                if not line.endswith("\n"):
+                    stream.seek(offset)
+                    break
+                count += 1
+                yield path, json.loads(line)
+
+    def close(self) -> None:
+        for stream in self.streams.values():
+            stream.close()
+        self.streams.clear()
+
+    def _show_activity(self, session: pytest.Session) -> None:
+        now = time.monotonic()
+        if not self.active or now - self.last_progress < 5:
+            return
+        reporter = session.config.pluginmanager.getplugin("terminalreporter")
+        if not isinstance(reporter, TerminalReporter):
+            return
+        nodeid, phase, started = min(self.active.values(), key=lambda activity: activity[2])
+        reporter.write_line(f"rtest: {len(self.active)} workers active; {phase} {nodeid} ({now - started:.0f}s)")
+        reporter._tw.flush()
+        self.last_progress = now
 
     def _dispatch(self, config: pytest.Config, event: dict[str, Any]) -> None:
         if event["kind"] == "report":
@@ -68,9 +91,13 @@ class _Controller:
             )
 
     def _drain(self, session: pytest.Session, *, final: bool = False) -> None:
-        for path, event in self._read_events():
+        for path, event in self._read_events(final=final):
             kind = event["kind"]
-            if kind == "workers":
+            if kind == "activity":
+                self.active[path] = event["nodeid"], event["phase"], time.monotonic()
+            elif kind == "idle":
+                self.active.pop(path, None)
+            elif kind == "workers":
                 self.expected = event["count"]
                 reporter = session.config.pluginmanager.getplugin("terminalreporter")
                 if isinstance(reporter, TerminalReporter):
@@ -82,8 +109,10 @@ class _Controller:
                     reporter.rewrite(f"collecting: {len(self.collected)}/{self.expected} workers ready")
             elif kind == "finish":
                 self.finished.add(path)
+                self.active.pop(path, None)
             elif self.collection_finished:
                 self._dispatch(session.config, event)
+                self.last_progress = time.monotonic()
             else:
                 self.pending.append(event)
         if not self.collection_finished and (final or self.expected == len(self.collected)):
@@ -101,6 +130,8 @@ class _Controller:
             for event in self.pending:
                 self._dispatch(session.config, event)
             self.pending.clear()
+        if not final:
+            self._show_activity(session)
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_runtestloop(self, session: pytest.Session) -> bool:
@@ -164,6 +195,7 @@ def run(arguments: list[str]) -> int:
                 )
             )
         finally:
+            controller.close()
             if previous_addopts is None:
                 os.environ.pop("PYTEST_ADDOPTS", None)
             else:
