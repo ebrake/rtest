@@ -55,10 +55,12 @@ impl WorkerPool {
 
     pub fn spawn_worker(&mut self, task: WorkerTask) {
         let worker_id = task.worker_id;
-        eprintln!(
-            "rtest: starting worker {worker_id} ({} selectors)",
-            task.tests.len()
-        );
+        if std::env::var_os("_RTEST_REPORT_DIRECTORY").is_none() {
+            eprintln!(
+                "rtest: starting worker {worker_id} ({} selectors)",
+                task.tests.len()
+            );
+        }
         let handle = thread::spawn(move || {
             // Independent pytest sessions cannot atomically share cache updates
             // on every supported platform, notably Windows.
