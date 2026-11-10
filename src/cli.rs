@@ -60,6 +60,10 @@ pub struct Args {
     #[arg(long)]
     pub pytest_functions: bool,
 
+    /// Suppress static selectors and fallback warnings, while retaining collection errors
+    #[arg(long)]
+    pub quiet_collection: bool,
+
     /// Test files or directories to run
     #[arg(help = "Test files or directories to run")]
     pub files: Vec<String>,

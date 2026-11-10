@@ -75,6 +75,19 @@ class TestPytestFunctionSelection:
                 result = self._run(root, *arguments)
                 assert result.returncode == ExitCodeValues.USAGE_ERROR
 
+    def test_quiet_collection_suppresses_selectors_but_keeps_parse_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "test_cases.py"
+            path.write_text("def test_case(): pass\n")
+            result = self._run(root, "--quiet-collection", "--collect-only")
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert "test_cases.py::test_case" not in result.stdout
+            path.write_text("def test_broken(:\n")
+            failed = self._run(root, "--quiet-collection", "--collect-only")
+            assert failed.returncode != 0
+            assert "ERROR" in failed.stdout
+
     def test_large_function_lists_execute_through_argument_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

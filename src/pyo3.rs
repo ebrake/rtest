@@ -72,11 +72,16 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) -> i32 {
         },
     };
 
-    let test_nodes =
-        match collect_and_display(&rootpath, &filtered_args, &mut std::io::sink(), false) {
-            ControlFlow::Continue(nodes) => nodes,
-            ControlFlow::Break(code) => return code,
-        };
+    let test_nodes = match collect_and_display(
+        &rootpath,
+        &filtered_args,
+        &mut std::io::sink(),
+        false,
+        false,
+    ) {
+        ControlFlow::Continue(nodes) => nodes,
+        ControlFlow::Break(code) => return code,
+    };
 
     execute_tests(
         &runner.program,
@@ -93,6 +98,7 @@ fn collect_and_display(
     paths: &[String],
     report: &mut dyn std::io::Write,
     pytest_functions: bool,
+    quiet_collection: bool,
 ) -> ControlFlow<i32, Vec<String>> {
     let (test_nodes, errors) = match collect_tests_rust(rootpath.to_path_buf(), paths) {
         Ok((nodes, errors)) => (nodes, errors),
@@ -104,7 +110,9 @@ fn collect_and_display(
     } else {
         test_nodes
     };
-    display_collection_results(&test_nodes, &errors);
+    if !quiet_collection || !errors.errors.is_empty() {
+        display_collection_results(&test_nodes, &errors);
+    }
     if let Err(error) = errors.write_cannot_expand_report(report) {
         eprintln!("ERROR: cannot write cannot-expand report: {error}");
         return ControlFlow::Break(exit_codes::TESTS_FAILED);
@@ -128,11 +136,16 @@ fn collect_cli_tests(rootpath: &std::path::Path, args: &Args) -> Vec<String> {
         eprintln!("ERROR: cannot open cannot-expand report: {error}");
         std::process::exit(exit_codes::TESTS_FAILED);
     });
-    let test_nodes =
-        match collect_and_display(rootpath, &args.files, &mut report, args.pytest_functions) {
-            ControlFlow::Continue(nodes) => nodes,
-            ControlFlow::Break(code) => std::process::exit(code),
-        };
+    let test_nodes = match collect_and_display(
+        rootpath,
+        &args.files,
+        &mut report,
+        args.pytest_functions,
+        args.quiet_collection,
+    ) {
+        ControlFlow::Continue(nodes) => nodes,
+        ControlFlow::Break(code) => std::process::exit(code),
+    };
 
     // Exit after collection if --collect-only flag is set
     if args.collect_only {

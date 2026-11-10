@@ -70,6 +70,10 @@ Parallel pytest workers use separate temporary cache directories. Pytest's
 `cache` fixture remains available within each worker; cached values do not
 persist between parallel rtest invocations.
 
+`--quiet-collection` suppresses the static selector listing and parameter
+expansion warnings when embedding rtest in another CLI. Collection errors are
+still reported.
+
 ### Native Runner
 
 The native runner (`--runner native`) executes tests using rtest's own decorators:
