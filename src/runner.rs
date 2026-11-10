@@ -100,16 +100,11 @@ pub fn execute_tests_parallel(config: &ParallelExecutionConfig, test_nodes: Vec<
 
     let mut exit_codes = Vec::new();
     for result in worker_pool.wait_for_all() {
-        println!("=== Worker {} ===", result.worker_id);
         let code = match result.result {
-            Ok(output) => {
-                print!("{}", String::from_utf8_lossy(&output.stdout));
-                eprint!("{}", String::from_utf8_lossy(&output.stderr));
-                output.status.code().unwrap_or_else(|| {
-                    eprintln!("Worker terminated: {}", output.status);
-                    1
-                })
-            }
+            Ok(status) => status.code().unwrap_or_else(|| {
+                eprintln!("Worker {} terminated: {status}", result.worker_id);
+                1
+            }),
             Err(error) => {
                 eprintln!("{error}");
                 1
