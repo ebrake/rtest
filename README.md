@@ -1,5 +1,9 @@
 # rtest
 
+This [RCLayer fork](https://github.com/rclayer/rtest) adds Python 3.15 build
+coverage and opt-in pytest function selection. The upstream project is
+[hughhan1/rtest](https://github.com/hughhan1/rtest).
+
 [![PyPI version](https://badge.fury.io/py/rtest.svg)](https://badge.fury.io/py/rtest)
 [![Python](https://img.shields.io/pypi/pyversions/rtest.svg)](https://pypi.org/project/rtest/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -45,6 +49,22 @@ rtest --runner native
 # Run tests in parallel (4 workers)
 rtest --runner native -n 4
 ```
+
+### Pytest function selection
+
+`rtest --runner pytest --pytest-functions` selects each discovered test
+function once and lets pytest expand its parametrizations. Use this mode when
+runtime values, custom ID hooks, or pytest's escaping rules prevent static
+parameter IDs from matching pytest. Fixtures and marker filtering remain
+pytest's responsibility. The mode selects all parameter variants of each
+function; explicit parameter selectors and the native runner are rejected.
+
+Large selector lists are passed through temporary pytest argument files, which
+remain available until the child process exits.
+
+Pass pytest marker filters through `--env PYTEST_ADDOPTS="-m critical"`.
+Workers with no matching tests do not fail a run when another worker selected
+tests; a globally empty selection retains pytest's exit code 5.
 
 ### Native Runner
 

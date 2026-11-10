@@ -26,15 +26,16 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Programming Language :: Rust",
     "Topic :: Software Development :: Testing",
 ]
 keywords = ["testing", "pytest", "rust", "performance"]
 
 [project.urls]
-Homepage = "https://github.com/hughhan1/rtest"
-Repository = "https://github.com/hughhan1/rtest.git"
-Issues = "https://github.com/hughhan1/rtest/issues"
+Homepage = "https://github.com/rclayer/rtest"
+Repository = "https://github.com/rclayer/rtest.git"
+Issues = "https://github.com/rclayer/rtest/issues"
 
 [project.scripts]
 rtest = "rtest.__main__:main"

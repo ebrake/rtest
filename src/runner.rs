@@ -8,6 +8,27 @@ pub struct PytestRunner {
     pub env_vars: Vec<(String, String)>,
 }
 
+/// Empty filtered shards are harmless when another shard selected tests.
+pub(crate) fn pytest_exit_code(codes: impl IntoIterator<Item = i32>) -> i32 {
+    let mut success = false;
+    let mut empty = false;
+    let mut failure = 0;
+    for code in codes {
+        match code {
+            0 => success = true,
+            5 => empty = true,
+            _ => failure = code,
+        }
+    }
+    if failure != 0 {
+        failure
+    } else if empty && !success {
+        5
+    } else {
+        0
+    }
+}
+
 /// Configuration for parallel test execution
 pub struct ParallelExecutionConfig<'a> {
     pub program: &'a str,
@@ -77,7 +98,7 @@ pub fn execute_tests_parallel(config: &ParallelExecutionConfig, test_nodes: Vec<
         }
     }
 
-    let mut overall_exit_code = 0;
+    let mut exit_codes = Vec::new();
     for result in worker_pool.wait_for_all() {
         println!("=== Worker {} ===", result.worker_id);
         let code = match result.result {
@@ -94,16 +115,28 @@ pub fn execute_tests_parallel(config: &ParallelExecutionConfig, test_nodes: Vec<
                 1
             }
         };
-        if code != 0 {
-            overall_exit_code = code;
-        }
+        exit_codes.push(code);
     }
 
-    overall_exit_code
+    pytest_exit_code(exit_codes)
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn empty_shards_preserve_success_failure_and_globally_empty_selections() {
+        for (codes, expected) in [
+            (vec![0, 5, 5], 0),
+            (vec![5, 0, 5], 0),
+            (vec![5, 5], 5),
+            (vec![1, 5, 0], 1),
+            (vec![4, 5], 4),
+            (vec![], 0),
+        ] {
+            assert_eq!(super::pytest_exit_code(codes), expected);
+        }
+    }
+
     #[test]
     fn test_execute_tests_nonexistent_program() {
         let exit_code = crate::pytest_executor::execute_tests(

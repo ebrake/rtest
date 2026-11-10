@@ -1,5 +1,6 @@
 """Integration tests for CLI functionality."""
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -7,6 +8,81 @@ from pathlib import Path
 
 import rtest
 from rtest.exit_code import ExitCodeValues
+
+
+class TestPytestFunctionSelection:
+    def _run(self, root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        environment = os.environ.copy()
+        environment.pop("PYTEST_PLUGINS", None)
+        environment["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+        environment["PYTEST_ADDOPTS"] = ""
+        return subprocess.run(
+            [sys.executable, "-m", "rtest", "--pytest-functions", *args],
+            cwd=root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    def test_runtime_ids_and_fixtures_execute_all_variants_once(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "conftest.py").write_text(
+                "import pytest\n"
+                "@pytest.fixture\n"
+                "def token(): return 'fixture'\n"
+                "def pytest_make_parametrize_id(config, val, argname): return f'runtime-{val}'\n"
+            )
+            (root / "test_cases.py").write_text(
+                "from pathlib import Path\n"
+                "import pytest\n"
+                "@pytest.mark.parametrize('value', [1, 2, 3])\n"
+                "def test_cases(value, token):\n"
+                "    assert token == 'fixture'\n"
+                "    with Path('calls.txt').open('a') as stream: stream.write(f'{value}\\n')\n"
+            )
+            collected = self._run(root, "--collect-only")
+            assert collected.returncode == 0, collected.stdout + collected.stderr
+            assert collected.stdout.count("  test_cases.py::test_cases\n") == 1
+            executed = self._run(root, "-n", "2")
+            assert executed.returncode == 0, executed.stdout + executed.stderr
+            assert sorted((root / "calls.txt").read_text().splitlines()) == ["1", "2", "3"]
+
+    def test_rejects_native_runner_and_explicit_parameter_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for arguments in (("--runner", "native"), ("test_cases.py::test_cases[one]",)):
+                result = self._run(root, *arguments)
+                assert result.returncode == ExitCodeValues.USAGE_ERROR
+
+    def test_large_function_lists_execute_through_argument_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "test_cases.py").write_text(
+                "\n".join(f"def test_function_with_a_long_selector_{index}(): pass" for index in range(1000))
+            )
+            result = self._run(root, "-n", "1")
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert "1000 passed" in result.stdout
+
+    def test_marker_filtering_allows_empty_workers_and_preserves_globally_empty_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "pytest.ini").write_text("[pytest]\nmarkers = selected: selected test\n")
+            (root / "test_cases.py").write_text(
+                "import pytest\n"
+                "@pytest.mark.selected\n"
+                "def test_selected(): pass\n"
+                "def test_other_a(): pass\n"
+                "def test_other_b(): pass\n"
+                "def test_other_c(): pass\n"
+            )
+            selected = self._run(root, "-n", "4", "--env", "PYTEST_ADDOPTS=-m selected -q")
+            assert selected.returncode == 0, selected.stdout + selected.stderr
+            assert "1 passed" in selected.stdout
+            empty = self._run(root, "-n", "4", "--env", "PYTEST_ADDOPTS=-m absent -q")
+            assert empty.returncode == 5, empty.stdout + empty.stderr
 
 
 class TestCLIBasics:

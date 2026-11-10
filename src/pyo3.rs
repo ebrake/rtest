@@ -8,8 +8,9 @@ use std::path::PathBuf;
 
 use crate::cli::{exit_codes, Args, Runner};
 use crate::collection::error::CollectionError;
+use crate::collection_integration::pytest_function_selectors;
 use crate::config::read_pytest_config;
-use crate::runner::PytestRunner;
+use crate::runner::{pytest_exit_code, PytestRunner};
 use crate::scheduler::DistributionMode;
 use crate::{
     collect_test_files, collect_tests_rust, default_python_classes, default_python_files,
@@ -71,10 +72,11 @@ fn run_tests(py: Python, pytest_args: Option<Vec<String>>) -> i32 {
         },
     };
 
-    let test_nodes = match collect_and_display(&rootpath, &filtered_args, &mut std::io::sink()) {
-        ControlFlow::Continue(nodes) => nodes,
-        ControlFlow::Break(code) => return code,
-    };
+    let test_nodes =
+        match collect_and_display(&rootpath, &filtered_args, &mut std::io::sink(), false) {
+            ControlFlow::Continue(nodes) => nodes,
+            ControlFlow::Break(code) => return code,
+        };
 
     execute_tests(
         &runner.program,
@@ -90,12 +92,18 @@ fn collect_and_display(
     rootpath: &std::path::Path,
     paths: &[String],
     report: &mut dyn std::io::Write,
+    pytest_functions: bool,
 ) -> ControlFlow<i32, Vec<String>> {
     let (test_nodes, errors) = match collect_tests_rust(rootpath.to_path_buf(), paths) {
         Ok((nodes, errors)) => (nodes, errors),
         Err(e) => handle_collection_error(e),
     };
 
+    let test_nodes = if pytest_functions {
+        pytest_function_selectors(test_nodes)
+    } else {
+        test_nodes
+    };
     display_collection_results(&test_nodes, &errors);
     if let Err(error) = errors.write_cannot_expand_report(report) {
         eprintln!("ERROR: cannot write cannot-expand report: {error}");
@@ -120,10 +128,11 @@ fn collect_cli_tests(rootpath: &std::path::Path, args: &Args) -> Vec<String> {
         eprintln!("ERROR: cannot open cannot-expand report: {error}");
         std::process::exit(exit_codes::TESTS_FAILED);
     });
-    let test_nodes = match collect_and_display(rootpath, &args.files, &mut report) {
-        ControlFlow::Continue(nodes) => nodes,
-        ControlFlow::Break(code) => std::process::exit(code),
-    };
+    let test_nodes =
+        match collect_and_display(rootpath, &args.files, &mut report, args.pytest_functions) {
+            ControlFlow::Continue(nodes) => nodes,
+            ControlFlow::Break(code) => std::process::exit(code),
+        };
 
     // Exit after collection if --collect-only flag is set
     if args.collect_only {
@@ -139,6 +148,21 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
     let mut full_args = vec!["rtest".to_string()];
     full_args.extend(argv);
     let args = Args::parse_from(full_args);
+
+    if args.pytest_functions {
+        if matches!(args.runner, Runner::Native) {
+            eprintln!("ERROR: --pytest-functions requires --runner pytest");
+            std::process::exit(exit_codes::USAGE_ERROR);
+        }
+        if args.files.iter().any(|value| {
+            value
+                .split_once("::")
+                .is_some_and(|(_, selector)| selector.contains('['))
+        }) {
+            eprintln!("ERROR: --pytest-functions cannot select individual parameter variants; use a file or function selector");
+            std::process::exit(exit_codes::USAGE_ERROR);
+        }
+    }
 
     let worker_count = determine_worker_count(args.numprocesses, args.maxprocesses);
 
@@ -195,7 +219,7 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
                     // Group tests by subproject
                     let test_groups = subproject::group_tests_by_subproject(&rootpath, test_nodes);
 
-                    let mut overall_exit_code = 0;
+                    let mut exit_codes = Vec::new();
 
                     for (subproject_root, tests) in test_groups {
                         let code = execute_tests(
@@ -207,12 +231,10 @@ fn main_cli_with_args(py: Python, argv: Vec<String>) {
                             &runner.env_vars,
                         );
 
-                        if code != 0 {
-                            overall_exit_code = code;
-                        }
+                        exit_codes.push(code);
                     }
 
-                    overall_exit_code
+                    pytest_exit_code(exit_codes)
                 } else {
                     let config = ParallelExecutionConfig {
                         program: &runner.program,

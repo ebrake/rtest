@@ -4,9 +4,69 @@ use crate::collection::error::{CollectionError, CollectionWarning};
 use crate::collection::nodes::Session;
 use crate::collection::types::CollectionNode;
 use crate::python_discovery::DiscoveryCache;
+#[cfg(any(feature = "extension-module", test))]
+use std::collections::HashSet;
 #[cfg(feature = "extension-module")]
 use std::io::{self, Write};
 use std::path::PathBuf;
+
+/// Preserve discovery order while delegating all parameter IDs to pytest.
+#[cfg(any(feature = "extension-module", test))]
+pub(crate) fn pytest_function_selectors(nodes: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut selectors = Vec::new();
+    for mut node in nodes {
+        if let Some(separator) = node.find("::") {
+            if let Some(parameter) = node[separator..].find('[') {
+                node.truncate(separator + parameter);
+            }
+        }
+        if seen.insert(node.clone()) {
+            selectors.push(node);
+        }
+    }
+    selectors
+}
+
+#[cfg(test)]
+mod selector_tests {
+    use super::pytest_function_selectors;
+
+    #[test]
+    fn delegates_parameters_once_without_changing_function_order() {
+        let nodes = [
+            "tests/test_api.py::test_request[first]",
+            "tests/test_api.py::test_plain",
+            "tests/test_api.py::test_request[second]",
+            "tests/test_api.py::test_request",
+            "tests/test_api.py::Other::test_request[first]",
+        ];
+        assert_eq!(
+            pytest_function_selectors(nodes.map(String::from).into()),
+            [
+                "tests/test_api.py::test_request",
+                "tests/test_api.py::test_plain",
+                "tests/test_api.py::Other::test_request",
+            ]
+        );
+    }
+
+    #[test]
+    fn preserves_brackets_in_paths_and_handles_unicode_and_nested_parameter_text() {
+        let nodes = [
+            "tests/[archive]/test_é.py::TestAPI::test_request[é[1]::other]",
+            "tests/[archive]/test_é.py::TestAPI::test_request[é[2]]",
+            "tests/[archive]/test_é.py",
+        ];
+        assert_eq!(
+            pytest_function_selectors(nodes.map(String::from).into()),
+            [
+                "tests/[archive]/test_é.py::TestAPI::test_request",
+                "tests/[archive]/test_é.py",
+            ]
+        );
+    }
+}
 
 /// Holds errors and warnings encountered during collection
 #[derive(Debug)]
